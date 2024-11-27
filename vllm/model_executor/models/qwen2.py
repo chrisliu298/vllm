@@ -38,6 +38,7 @@ from vllm.model_executor.layers.linear import (MergedColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.pooler import Pooler, PoolingType
+from vllm.config import CacheConfig, LoRAConfig, PoolerConfig
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
@@ -437,7 +438,7 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         "up_proj": ("gate_up_proj", 1),
     }
 
-    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = "", pooler_config: Optional[PoolerConfig] = None):
         super().__init__()
         config = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
@@ -467,8 +468,8 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         # because the architecture name is the same
         self._pooler = Pooler.from_config_with_defaults(
             pooler_config,
-            pooling_type=PoolingType.LAST,
-            normalize=True,
+            pooling_type=PoolingType.STEP,
+            normalize=False,
             softmax=False)
 
         self.make_empty_intermediate_tensors = (
@@ -513,7 +514,8 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         hidden_states: torch.Tensor,
         pooling_metadata: PoolingMetadata,
     ) -> Optional[PoolerOutput]:
-        return self._pooler(hidden_states, pooling_metadata)
+        logits = self.compute_logits(hidden_states, None)
+        return self._pooler(logits, pooling_metadata)
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
